@@ -86,6 +86,7 @@ export const LobbyRoom = () => {
                 name: guestName,
                 isHost: false
             }
+            const lobbySnapshot = { ...activeLobby, lobby_state: state }
 
             await supabase
                 .from('lobbies')
@@ -98,7 +99,10 @@ export const LobbyRoom = () => {
                     await targetInbox.send({
                         type: 'broadcast',
                         event: 'join_confirmed',
-                        payload: { lobbyJoinCode: activeLobby.join_code }
+                        payload: {
+                            lobbyJoinCode: activeLobby.join_code,
+                            lobbySnapshot
+                        }
                     })
                     supabase.removeChannel(targetInbox)
                 }

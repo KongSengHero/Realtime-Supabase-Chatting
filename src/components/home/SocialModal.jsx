@@ -3,7 +3,7 @@ import { useRealtime } from '../../context/RealtimeContext'
 import { Users, UserMinus, UserCheck, UserX, X, Heart, Clock } from 'lucide-react'
 
 export const SocialModal = ({ isOpen, onClose }) => {
-    const { friends, friendRequests, acceptFriendRequest, rejectFriendRequest, removeFriend } = useRealtime()
+    const { friends, friendRequests, acceptFriendRequest, rejectFriendRequest, cancelSentFriendRequest, removeFriend } = useRealtime()
     const [activeTab, setActiveTab] = useState('friends') 
 
     if (!isOpen) return null
@@ -162,7 +162,7 @@ export const SocialModal = ({ isOpen, onClose }) => {
                                         </div>
                                     </div>
                                     <button
-                                        onClick={() => rejectFriendRequest(req.id)} 
+                                        onClick={() => cancelSentFriendRequest(req.id)}
                                         title="Cancel Request"
                                         className="p-2 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 text-[#94a3b8] hover:text-red-400 rounded-lg transition-all cursor-pointer"
                                     >

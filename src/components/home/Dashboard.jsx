@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useRealtime } from '../../context/RealtimeContext'
 import { FriendContainer } from './FriendContainer'
@@ -11,7 +11,9 @@ import {
 
 export const Dashboard = () => {
     const { player, signOut, isLockedOut, stealSession, deleteAccount, signInWithGoogle } = useAuth()
-    const { activeLobby, hostLobby, joinLobby } = useRealtime()
+    const { activeLobby, hostLobby, joinLobby, hydrateLobbyFromInvite } = useRealtime()
+    const joinLobbyRef = useRef(joinLobby)
+    joinLobbyRef.current = joinLobby
 
     const [joinCodeInput, setJoinCodeInput] = useState('')
     const [joinPasswordInput, setJoinPasswordInput] = useState('')
@@ -20,14 +22,16 @@ export const Dashboard = () => {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
     useEffect(() => {
-        if (!player) return
+        if (!player?.id) return
 
         const confirmChannel = supabase
             .channel(`personal_redirect:${player.id}`)
             .on('broadcast', { event: 'join_confirmed' }, async (payload) => {
                 setLoading(true)
-                const code = payload.payload.lobbyJoinCode
-                await joinLobby(code)
+                const hydrated = hydrateLobbyFromInvite(payload.payload)
+                if (!hydrated.success && payload.payload?.lobbyJoinCode) {
+                    await joinLobbyRef.current(payload.payload.lobbyJoinCode)
+                }
                 setLoading(false)
             })
             .on('broadcast', { event: 'join_declined' }, () => {
@@ -35,8 +39,8 @@ export const Dashboard = () => {
             })
             .subscribe()
 
-        return () => supabase.removeChannel(confirmChannel); 
-    }, [player])
+        return () => supabase.removeChannel(confirmChannel)
+    }, [player?.id])
 
     const handleHost = async (type) => {
         setLoading(true)

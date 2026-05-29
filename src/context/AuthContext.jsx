@@ -1,5 +1,6 @@
 ﻿import React, { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
+import { ensureSessionReady, resetAuthBootstrap, runWithSession } from '../lib/authSession'
 
 const AuthContext = createContext(null)
 
@@ -15,12 +16,25 @@ export const AuthProvider = ({ children }) => {
     // Refs so interval/event callbacks always see latest values WITHOUT triggering re-mounts
     const playerSubRef = useRef(null)
     const userRef = useRef(null)
+    const playerRef = useRef(null)
     const isLockedOutRef = useRef(false)
-    const lastHeartbeatRef = useRef(0)
+    const lastProfileFetchRef = useRef(0)
+    const sessionReadyForRef = useRef(null)
+    const setupInProgressRef = useRef(false)
+
+    const PLAYER_SYNC_FIELDS = [
+        'current_lobby_id', 'current_status', 'player_name', 'profile_url',
+        'banner_url', 'is_anonymous', 'active_session_id', 'session_id', 'player_id'
+    ]
 
     // Keep refs in sync with state (lightweight syncs, no effect re-run risks)
     useEffect(() => { userRef.current = user }, [user])
+    useEffect(() => { playerRef.current = player }, [player])
     useEffect(() => { isLockedOutRef.current = isLockedOut }, [isLockedOut])
+
+    const patchPlayer = (partial) => {
+        setPlayer(prev => (prev ? { ...prev, ...partial } : prev))
+    }
 
     // ─── Profile Fetch ────────────────────────────────────────────────────────────
     const fetchPlayerProfile = async (userId) => {
@@ -72,10 +86,15 @@ export const AuthProvider = ({ children }) => {
                 'postgres_changes',
                 { event: 'UPDATE', schema: 'public', table: 'players', filter },
                 (payload) => {
-                    setPlayer(payload.new)
-                    // Lockout check: only fires when DB row changes, not on a timer
-                    const locked = !!(payload.new.active_session_id && payload.new.active_session_id !== tabSessionId)
+                    const next = payload.new
+                    const locked = !!(next.active_session_id && next.active_session_id !== tabSessionId)
                     setIsLockedOut(locked)
+                    // Ignore heartbeat-only updates (last_online) to avoid cascading re-renders
+                    setPlayer(prev => {
+                        if (!prev) return next
+                        const meaningful = PLAYER_SYNC_FIELDS.some(k => prev[k] !== next[k])
+                        return meaningful ? { ...prev, ...next } : prev
+                    })
                 }
             )
             .subscribe()
@@ -204,6 +223,8 @@ export const AuthProvider = ({ children }) => {
                 playerSubRef.current = null
             }
             await supabase.auth.signOut()
+            resetAuthBootstrap()
+            sessionReadyForRef.current = null
             setUser(null)
             setPlayer(null)
             setIsLockedOut(false)
@@ -216,36 +237,68 @@ export const AuthProvider = ({ children }) => {
 
     // ─── Shared session setup ─────────────────────────────────────────────────────
     const setupSession = async (currentUser) => {
-        userRef.current = currentUser
-        setUser(currentUser)
-        await checkAndMergeAccounts(currentUser)
-        const profile = await fetchPlayerProfile(currentUser.id)
-        if (profile) {
-            await initializeTabSession(currentUser.id)
-            // record the time we last updated `last_online` during session init
-            lastHeartbeatRef.current = Date.now()
-            subscribeToPlayerRow(currentUser.id, profile.player_id)
+        if (!currentUser) return
+        if (sessionReadyForRef.current === currentUser.id) return
+        if (setupInProgressRef.current) return
+
+        setupInProgressRef.current = true
+        try {
+            sessionReadyForRef.current = currentUser.id
+            await runWithSession(async () => {
+                userRef.current = currentUser
+                setUser(currentUser)
+                await checkAndMergeAccounts(currentUser)
+                const profile = await fetchPlayerProfile(currentUser.id)
+                if (profile) {
+                    await initializeTabSession(currentUser.id)
+                    lastProfileFetchRef.current = Date.now()
+                    subscribeToPlayerRow(currentUser.id, profile.player_id)
+                }
+            })
+        } finally {
+            setupInProgressRef.current = false
+            setLoading(false)
         }
-        setLoading(false)
     }
 
-    // ─── MAIN EFFECT: runs exactly once on mount ──────────────────────────────────
-    useEffect(() => {
-        // onAuthStateChange emits INITIAL_SESSION immediately on mount, so we do NOT
-        // need a separate getSession() call. That duplicate call was the primary spam source.
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            const currentUser = session?.user || null
+    const refreshProfile = async () => {
+        const u = userRef.current
+        if (!u) return null
+        const now = Date.now()
+        if (now - lastProfileFetchRef.current < 5000) return playerRef.current
+        lastProfileFetchRef.current = now
+        return fetchPlayerProfile(u.id)
+    }
 
-            if (event === 'INITIAL_SESSION') {
-                if (currentUser) {
-                    await setupSession(currentUser)
+    // ─── MAIN EFFECT: one getSession on load, lightweight auth listener after ─────
+    useEffect(() => {
+        let cancelled = false
+
+        const runBootstrap = async () => {
+            try {
+                const session = await ensureSessionReady()
+                if (cancelled) return
+                if (session?.user) {
+                    await setupSession(session.user)
                 } else {
                     setLoading(false)
                 }
-            } else if (event === 'SIGNED_IN') {
-                await setupSession(currentUser)
-            } else if (event === 'SIGNED_OUT') {
+            } catch (err) {
+                console.error('Auth bootstrap failed:', err.message)
+                if (!cancelled) setLoading(false)
+            }
+        }
+
+        runBootstrap()
+
+        // Never await inside this callback — async work causes nested getSession/refresh loops.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return
+
+            if (event === 'SIGNED_OUT') {
                 userRef.current = null
+                sessionReadyForRef.current = null
+                resetAuthBootstrap()
                 setUser(null)
                 setPlayer(null)
                 setIsLockedOut(false)
@@ -254,33 +307,29 @@ export const AuthProvider = ({ children }) => {
                     supabase.removeChannel(playerSubRef.current)
                     playerSubRef.current = null
                 }
+                return
             }
-            // TOKEN_REFRESHED — intentionally ignored; the SDK handles it automatically.
+
+            if (event === 'SIGNED_IN' && session?.user) {
+                resetAuthBootstrap()
+                queueMicrotask(() => {
+                    if (!cancelled) {
+                        ensureSessionReady()
+                            .then(() => setupSession(session.user))
+                            .catch((err) => console.error('Sign-in session setup failed:', err.message))
+                    }
+                })
+            }
         })
 
-        // Heartbeat: throttle DB writes to at most once per minute
-        const heartbeat = setInterval(() => {
-            const u = userRef.current
-            const now = Date.now()
-            if (u && !isLockedOutRef.current) {
-                // Only update if it's been more than 60s since last update
-                if (now - (lastHeartbeatRef.current || 0) < 60000) return
-                supabase
-                    .from('players')
-                    .update({ last_online: new Date().toISOString() })
-                    .eq('id', u.id)
-                    .then(() => { lastHeartbeatRef.current = Date.now(); try { console.debug('[Auth] heartbeat update for', u.id, new Date().toISOString()) } catch (e) { } })
-            }
-        }, 60000)
-
         return () => {
+            cancelled = true
             subscription.unsubscribe()
-            clearInterval(heartbeat)
             if (playerSubRef.current) {
                 supabase.removeChannel(playerSubRef.current)
             }
         }
-    }, []) // empty array — runs ONCE, never re-mounts
+    }, [])
 
     return (
         <AuthContext.Provider
@@ -295,7 +344,8 @@ export const AuthProvider = ({ children }) => {
                 signOut,
                 stealSession,
                 deleteAccount,
-                refreshProfile: () => userRef.current ? fetchPlayerProfile(userRef.current.id) : null
+                refreshProfile,
+                patchPlayer
             }}
         >
             {children}

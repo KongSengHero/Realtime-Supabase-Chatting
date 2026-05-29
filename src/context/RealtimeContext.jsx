@@ -1,17 +1,19 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
+import { ensureSessionReady, runWithSession } from '../lib/authSession'
 import { useAuth } from './AuthContext'
 
 const RealtimeContext = createContext(null)
 
 export const RealtimeProvider = ({ children }) => {
-    const { user, player, refreshProfile } = useAuth()
+    const { user, player, patchPlayer } = useAuth()
 
     // Real-time states
     const [activeLobby, setActiveLobby] = useState(null)
     const [lobbyMessages, setLobbyMessages] = useState([])
     const [friends, setFriends] = useState([])
     const [friendRequests, setFriendRequests] = useState({ received: [], sent: [] })
+    const [onlinePresence, setOnlinePresence] = useState({})
     const [incomingInvite, setIncomingInvite] = useState(null)     // { lobbyId, joinCode, hostName, hostId }
     const [incomingJoinReq, setIncomingJoinReq] = useState(null)     // { lobbyId, playerName, playerId }
 
@@ -20,8 +22,14 @@ export const RealtimeProvider = ({ children }) => {
 
     const inboxChannelRef = useRef(null)
     const lobbyChannelRef = useRef(null)
+    const socialChannelRef = useRef(null)
     const fetchDebounceRef = useRef(null)
     const lastSocialFetchRef = useRef(0)
+    const socialFetchInFlightRef = useRef(false)
+    const socialFetchQueuedRef = useRef(false)
+    const presenceChannelRef = useRef(null)
+    const SOCIAL_FETCH_MIN_MS = 8000
+    const SOCIAL_DEBOUNCE_MS = 600
     // Ref-based user snapshot so fetchSocialData can be called from realtime
     // callbacks without capturing a stale closure
     const userRef = useRef(user)
@@ -30,179 +38,174 @@ export const RealtimeProvider = ({ children }) => {
     // ─────────────────────────────────────────────────────────
     // SOCIAL & FRIENDSHIPS FETCH & TRIGGERS
     // ─────────────────────────────────────────────────────────
-    const fetchSocialData = async () => {
+    const fetchSocialData = async ({ force = false } = {}) => {
         const currentUser = userRef.current
         if (!currentUser) return
-        // Debug: log when social fetch runs (temporary)
-        try { console.debug('[Realtime] fetchSocialData for', currentUser.id, new Date().toISOString()) } catch (e) { }
-        // Throttle social fetches to at most once every 5s to avoid storms
+
         const now = Date.now()
-        if (lastSocialFetchRef.current && now - lastSocialFetchRef.current < 5000) {
-            try { console.debug('[Realtime] fetchSocialData throttled', currentUser.id) } catch (e) { }
+        if (!force && lastSocialFetchRef.current && now - lastSocialFetchRef.current < SOCIAL_FETCH_MIN_MS) {
             return
         }
-        lastSocialFetchRef.current = now
-        try {
-            // 1. Fetch friendships for current user only (avoid fetching entire table)
-            const { data: friendshipsData, error: fError } = await supabase
-                .from('player_friendships')
-                .select('*')
-                .or(`player_one_id.eq.${currentUser.id},player_two_id.eq.${currentUser.id}`)
-
-            if (fError) throw fError
-
-            // Compute friend IDs
-            const friendIds = friendshipsData.map(f =>
-                f.player_one_id === currentUser.id ? f.player_two_id : f.player_one_id
-            )
-
-            // 2. Fetch requests (received and sent) only for current user
-            const { data: reqs, error: rError } = await supabase
-                .from('player_friend_requests')
-                .select('*')
-                .or(`recipient_id.eq.${currentUser.id},requester_id.eq.${currentUser.id}`)
-
-            if (rError) throw rError
-
-            const receivedReqs = reqs.filter(r => r.recipient_id === currentUser.id)
-            const sentReqs = reqs.filter(r => r.requester_id === currentUser.id)
-
-            // Consolidate all profile IDs we need and fetch once
-            const idSet = new Set()
-            friendIds.forEach(id => id && idSet.add(id))
-            receivedReqs.map(r => r.requester_id).forEach(id => id && idSet.add(id))
-            sentReqs.map(r => r.recipient_id).forEach(id => id && idSet.add(id))
-
-            const allProfileIds = Array.from(idSet)
-            if (allProfileIds.length > 0) {
-                const { data: allProfiles, error: apError } = await supabase
-                    .from('players')
-                    .select('id, player_id, player_name, profile_url, banner_url, current_status, last_online')
-                    .in('id', allProfileIds)
-
-                if (apError) throw apError
-
-                // Partition profiles into friends / received / sent
-                const friendsProfiles = allProfiles.filter(p => friendIds.includes(p.id))
-                const receivedProfiles = allProfiles.filter(p => receivedReqs.map(r => r.requester_id).includes(p.id))
-                const sentProfiles = allProfiles.filter(p => sentReqs.map(r => r.recipient_id).includes(p.id))
-
-                setFriends(friendsProfiles)
-                setFriendRequests({ received: receivedProfiles || [], sent: sentProfiles || [] })
-            } else {
-                setFriends([])
-                setFriendRequests({ received: [], sent: [] })
-            }
-        } catch (err) {
-            console.error('Error fetching social data:', err.message)
+        if (socialFetchInFlightRef.current) {
+            socialFetchQueuedRef.current = true
+            return
         }
+
+        return runWithSession(async () => {
+            socialFetchInFlightRef.current = true
+            lastSocialFetchRef.current = now
+            try {
+                const { data: snapshot, error: rpcError } = await supabase.rpc('get_social_snapshot')
+                if (rpcError) throw rpcError
+                setFriends(snapshot?.friends || [])
+                setFriendRequests({
+                    received: snapshot?.received || [],
+                    sent: snapshot?.sent || []
+                })
+            } catch (err) {
+                console.error('Error fetching social data:', err.message)
+            } finally {
+                socialFetchInFlightRef.current = false
+                if (socialFetchQueuedRef.current) {
+                    socialFetchQueuedRef.current = false
+                    fetchSocialData({ force: true })
+                }
+            }
+        })
     }
 
-    // Debounced wrapper — used by realtime callbacks to coalesce rapid-fire
-    // DB change events into a single fetch (avoids double-fetching after writes)
     const debouncedFetchSocialData = () => {
         if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current)
-        fetchDebounceRef.current = setTimeout(() => fetchSocialData(), 400)
+        fetchDebounceRef.current = setTimeout(() => fetchSocialData({ force: false }), SOCIAL_DEBOUNCE_MS)
     }
 
     // Handle Send Friend Request
     const sendFriendRequest = async (searchTerm) => {
         if (!user) return { success: false, message: 'Not logged in' }
         try {
-            // Find player by name or player_id (16 digits)
-            const { data: foundPlayers, error } = await supabase
-                .from('players')
-                .select('id, player_id, player_name')
-                .or(`player_name.eq."${searchTerm}",player_id.eq."${searchTerm}"`)
+            return await runWithSession(async () => {
+                const { data: foundPlayers, error } = await supabase
+                    .from('players')
+                    .select('id, player_id, player_name')
+                    .or(`player_name.eq."${searchTerm}",player_id.eq."${searchTerm}"`)
 
-            if (error) throw error
-            if (!foundPlayers || foundPlayers.length === 0) {
-                return { success: false, message: 'Player not found.' }
-            }
+                if (error) throw error
+                if (!foundPlayers?.length) {
+                    return { success: false, message: 'Player not found.' }
+                }
 
-            const target = foundPlayers[0]
-            if (target.id === user.id) {
-                return { success: false, message: 'You cannot add yourself.' }
-            }
+                const target = foundPlayers[0]
+                if (target.id === user.id) {
+                    return { success: false, message: 'You cannot add yourself.' }
+                }
+                if (friends.some(f => f.id === target.id)) {
+                    return { success: false, message: 'You are already friends.' }
+                }
 
-            // Check if already friends
-            const isAlreadyFriend = friends.some(f => f.id === target.id)
-            if (isAlreadyFriend) {
-                return { success: false, message: 'You are already friends.' }
-            }
+                const { error: insError } = await supabase
+                    .from('player_friend_requests')
+                    .insert({ requester_id: user.id, recipient_id: target.id })
 
-            // Insert request
-            const { error: insError } = await supabase
-                .from('player_friend_requests')
-                .insert({ requester_id: user.id, recipient_id: target.id })
+                if (insError) throw insError
 
-            if (insError) throw insError
-
-            // Do NOT manually call fetchSocialData() here — the realtime postgres_changes
-            // subscription will fire and call debouncedFetchSocialData() automatically.
-            return { success: true, message: `Friend request sent to ${target.player_name}!` }
+                await fetchSocialData({ force: true })
+                return { success: true, message: `Friend request sent to ${target.player_name}!` }
+            })
         } catch (err) {
             console.error(err)
             return { success: false, message: 'Request already exists or failed to send.' }
         }
     }
 
-    // Accept Friend Request
     const acceptFriendRequest = async (requesterId) => {
         if (!user) return
+        const acceptedProfile = friendRequests.received.find(r => r.id === requesterId)
         try {
-            // Delete request first
-            await supabase
-                .from('player_friend_requests')
-                .delete()
-                .eq('requester_id', requesterId)
-                .eq('recipient_id', user.id)
+            await runWithSession(async () => {
+                await supabase
+                    .from('player_friend_requests')
+                    .delete()
+                    .eq('requester_id', requesterId)
+                    .eq('recipient_id', user.id)
 
-            // Insert friendship (ensuring player_one_id < player_two_id)
-            const p1 = user.id.localeCompare(requesterId) < 0 ? user.id : requesterId
-            const p2 = user.id.localeCompare(requesterId) < 0 ? requesterId : user.id
+                const p1 = user.id.localeCompare(requesterId) < 0 ? user.id : requesterId
+                const p2 = user.id.localeCompare(requesterId) < 0 ? requesterId : user.id
 
-            const { error } = await supabase
-                .from('player_friend_relationships' in supabase ? 'player_friendships' : 'player_friendships')
-                .insert({ player_one_id: p1, player_two_id: p2 })
+                const { error } = await supabase
+                    .from('player_friendships')
+                    .insert({ player_one_id: p1, player_two_id: p2 })
 
-            if (error) throw error
-            // Realtime subscription handles the refresh
+                if (error) throw error
+            })
+
+            setFriendRequests(prev => ({
+                ...prev,
+                received: prev.received.filter(r => r.id !== requesterId)
+            }))
+            if (acceptedProfile) {
+                setFriends(prev => (prev.some(f => f.id === requesterId) ? prev : [...prev, acceptedProfile]))
+            }
+            await fetchSocialData({ force: true })
         } catch (err) {
             console.error('Error accepting friend request:', err.message)
         }
     }
 
-    // Reject Friend Request
     const rejectFriendRequest = async (requesterId) => {
         if (!user) return
         try {
-            await supabase
-                .from('player_friend_requests')
-                .delete()
-                .eq('requester_id', requesterId)
-                .eq('recipient_id', user.id)
-
-            // Realtime subscription handles the refresh
+            await runWithSession(async () => {
+                await supabase
+                    .from('player_friend_requests')
+                    .delete()
+                    .eq('requester_id', requesterId)
+                    .eq('recipient_id', user.id)
+            })
+            setFriendRequests(prev => ({
+                ...prev,
+                received: prev.received.filter(r => r.id !== requesterId)
+            }))
+            await fetchSocialData({ force: true })
         } catch (err) {
             console.error('Error rejecting friend request:', err.message)
         }
     }
 
-    // Remove Friend
+    const cancelSentFriendRequest = async (recipientId) => {
+        if (!user) return
+        try {
+            await runWithSession(async () => {
+                await supabase
+                    .from('player_friend_requests')
+                    .delete()
+                    .eq('requester_id', user.id)
+                    .eq('recipient_id', recipientId)
+            })
+            setFriendRequests(prev => ({
+                ...prev,
+                sent: prev.sent.filter(r => r.id !== recipientId)
+            }))
+            await fetchSocialData({ force: true })
+        } catch (err) {
+            console.error('Error cancelling friend request:', err.message)
+        }
+    }
+
     const removeFriend = async (friendId) => {
         if (!user) return
         try {
-            const p1 = user.id.localeCompare(friendId) < 0 ? user.id : friendId
-            const p2 = user.id.localeCompare(friendId) < 0 ? friendId : user.id
+            await runWithSession(async () => {
+                const p1 = user.id.localeCompare(friendId) < 0 ? user.id : friendId
+                const p2 = user.id.localeCompare(friendId) < 0 ? friendId : user.id
 
-            await supabase
-                .from('player_friendships')
-                .delete()
-                .eq('player_one_id', p1)
-                .eq('player_two_id', p2)
-
-            // Realtime subscription handles the refresh
+                await supabase
+                    .from('player_friendships')
+                    .delete()
+                    .eq('player_one_id', p1)
+                    .eq('player_two_id', p2)
+            })
+            setFriends(prev => prev.filter(f => f.id !== friendId))
+            await fetchSocialData({ force: true })
         } catch (err) {
             console.error('Error removing friend:', err.message)
         }
@@ -230,22 +233,18 @@ export const RealtimeProvider = ({ children }) => {
                 },
                 (payload) => {
                     if (payload.eventType === 'DELETE') {
-                        // Lobby deleted (host closed it)
                         setActiveLobby(null)
                         setLobbyMessages([])
-                        refreshProfile()
+                        patchPlayer({ current_lobby_id: null, current_status: 'Online' })
                     } else {
-                        // Update active lobby state
                         setActiveLobby(payload.new)
 
-                        // Lock/kick check: if we are no longer in the player list, we got kicked!
                         if (payload.new.lobby_state?.Players) {
                             const inside = Object.keys(payload.new.lobby_state.Players).includes(user?.id)
                             if (!inside) {
-                                // We got kicked! Clean up
                                 setActiveLobby(null)
                                 setLobbyMessages([])
-                                refreshProfile()
+                                patchPlayer({ current_lobby_id: null, current_status: 'Online' })
                                 alert('You have been kicked from the lobby.')
                             }
                         }
@@ -260,7 +259,7 @@ export const RealtimeProvider = ({ children }) => {
                 if (payload.payload.kickedPlayerId === user?.id) {
                     setActiveLobby(null)
                     setLobbyMessages([])
-                    refreshProfile()
+                    patchPlayer({ current_lobby_id: null, current_status: 'Online' })
                     alert('You have been kicked by the host.')
                 }
             })
@@ -273,6 +272,7 @@ export const RealtimeProvider = ({ children }) => {
     const hostLobby = async (lobbyType) => {
         if (!user || !player) return null
         try {
+            return await runWithSession(async () => {
             const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase()
             const initialLobbyState = {
                 isPrivate: false,
@@ -315,8 +315,9 @@ export const RealtimeProvider = ({ children }) => {
             setActiveLobby(lobbyData)
             setLobbyMessages([])
             subscribeToLobby(lobbyData.id)
-            refreshProfile()
+            patchPlayer({ current_lobby_id: lobbyData.id, current_status: 'Lobby' })
             return lobbyData
+            })
         } catch (err) {
             console.error('Error hosting lobby:', err.message)
             alert('Failed to host lobby: ' + err.message)
@@ -328,11 +329,13 @@ export const RealtimeProvider = ({ children }) => {
     const setLobbyPassword = async (password) => {
         if (!activeLobby) return
         try {
+            await runWithSession(async () => {
             const { error } = await supabase.rpc('set_lobby_password', {
                 p_lobby_id: activeLobby.id,
                 p_password: password
             })
             if (error) throw error
+            })
         } catch (err) {
             console.error('Error locking lobby:', err.message)
         }
@@ -342,10 +345,12 @@ export const RealtimeProvider = ({ children }) => {
     const removeLobbyPassword = async () => {
         if (!activeLobby) return
         try {
+            await runWithSession(async () => {
             const { error } = await supabase.rpc('remove_lobby_password', {
                 p_lobby_id: activeLobby.id
             })
             if (error) throw error
+            })
         } catch (err) {
             console.error('Error unlocking lobby:', err.message)
         }
@@ -355,7 +360,7 @@ export const RealtimeProvider = ({ children }) => {
     const joinLobby = async (joinCode, password = '') => {
         if (!user || !player) return { success: false, message: 'Not logged in' }
         try {
-            // Find lobby
+            return await runWithSession(async () => {
             const { data: lobby, error } = await supabase
                 .from('lobbies')
                 .select('*')
@@ -409,21 +414,34 @@ export const RealtimeProvider = ({ children }) => {
                 })
                 .eq('id', user.id)
 
-            setActiveLobby(lobby)
+            setActiveLobby({ ...lobby, lobby_state: state })
             setLobbyMessages([])
             subscribeToLobby(lobby.id)
-            refreshProfile()
+            patchPlayer({ current_lobby_id: lobby.id, current_status: 'Lobby' })
             return { success: true }
+            })
         } catch (err) {
             console.error('Error joining lobby:', err.message)
             return { success: false, message: err.message }
         }
     }
 
+    // Hydrate lobby from host broadcast confirmation to avoid an extra REST join flow.
+    const hydrateLobbyFromInvite = (payload) => {
+        if (!payload?.lobbySnapshot?.id) return { success: false, message: 'Invalid invite payload.' }
+        const lobby = payload.lobbySnapshot
+        setActiveLobby(lobby)
+        setLobbyMessages([])
+        subscribeToLobby(lobby.id)
+        patchPlayer({ current_lobby_id: lobby.id, current_status: 'Lobby' })
+        return { success: true }
+    }
+
     // Leave Lobby
     const leaveLobby = async () => {
         if (!activeLobby || !user) return
         try {
+            await runWithSession(async () => {
             const isHost = activeLobby.host_id === user.id
 
             if (isHost) {
@@ -469,7 +487,8 @@ export const RealtimeProvider = ({ children }) => {
 
             setActiveLobby(null)
             setLobbyMessages([])
-            refreshProfile()
+            patchPlayer({ current_lobby_id: null, current_status: 'Online' })
+            })
         } catch (err) {
             console.error('Error leaving lobby:', err.message)
         }
@@ -479,6 +498,7 @@ export const RealtimeProvider = ({ children }) => {
     const kickPlayer = async (guestUuid) => {
         if (!activeLobby || activeLobby.host_id !== user?.id) return
         try {
+            await runWithSession(async () => {
             // Remove guest from Players state
             const state = activeLobby.lobby_state
             if (state?.Players) {
@@ -505,6 +525,7 @@ export const RealtimeProvider = ({ children }) => {
                 .from('lobbies')
                 .update({ lobby_state: state })
                 .eq('id', activeLobby.id)
+            })
         } catch (err) {
             console.error('Error kicking guest:', err.message)
         }
@@ -650,70 +671,127 @@ export const RealtimeProvider = ({ children }) => {
     // Track whether we've already reconnected to a lobby for the current login session
     const lobbyReconnectedRef = useRef(false)
 
-    // Primary effect: runs when user logs in/out. Sets up social data + realtime subscriptions.
-    // Includes `player?.player_id` so we can subscribe to the personal inbox using the
-    // public `player_id` once the profile has been fetched.
+    // Social + presence + inbox: wait for one shared session, then subscribe (no parallel refresh_token)
     useEffect(() => {
-        if (user) {
-            fetchSocialData()
-            // Prefer the public player identifier when available to avoid exposing DB PKs
-            const inboxId = player?.player_id || user.id
-            subscribeToPersonalInbox(inboxId)
-            lobbyReconnectedRef.current = false // reset reconnect flag on new login
-
-            // Listen for general database table changes for friendships & friend requests
-            // (no polling interval needed — realtime handles updates reactively)
-            const friendshipsSub = supabase
-                .channel('social_updates')
-                .on(
-                    'postgres_changes',
-                    { event: '*', schema: 'public', table: 'player_friendships' },
-                    () => debouncedFetchSocialData()
-                )
-                .on(
-                    'postgres_changes',
-                    { event: '*', schema: 'public', table: 'player_friend_requests' },
-                    () => debouncedFetchSocialData()
-                )
-                .subscribe()
-
-            return () => {
-                supabase.removeChannel(friendshipsSub)
-                if (inboxChannelRef.current) {
-                    supabase.removeChannel(inboxChannelRef.current)
-                }
-                if (lobbyChannelRef.current) {
-                    supabase.removeChannel(lobbyChannelRef.current)
-                }
-            }
-        } else {
+        if (!user?.id) {
             setFriends([])
             setFriendRequests({ received: [], sent: [] })
             setActiveLobby(null)
             setLobbyMessages([])
             setIncomingInvite(null)
             setIncomingJoinReq(null)
+            setOnlinePresence({})
+            return
         }
-    }, [user, player?.player_id])
+
+        const uid = user.id
+        const inboxPlayerId = player?.player_id
+        let cancelled = false
+        lobbyReconnectedRef.current = false
+
+        const startRealtime = async () => {
+            await ensureSessionReady()
+            if (cancelled) return
+
+            fetchSocialData({ force: true })
+
+            const socialChannel = supabase
+                .channel(`social:${uid}`)
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'player_friendships', filter: `player_one_id=eq.${uid}` },
+                    () => debouncedFetchSocialData()
+                )
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'player_friendships', filter: `player_two_id=eq.${uid}` },
+                    () => debouncedFetchSocialData()
+                )
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'player_friend_requests', filter: `requester_id=eq.${uid}` },
+                    () => debouncedFetchSocialData()
+                )
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'player_friend_requests', filter: `recipient_id=eq.${uid}` },
+                    () => debouncedFetchSocialData()
+                )
+                .subscribe()
+
+            socialChannelRef.current = socialChannel
+
+            const presenceChannel = supabase.channel('global_presence', {
+                config: { presence: { key: uid } }
+            })
+
+            presenceChannel
+                .on('presence', { event: 'sync' }, () => {
+                    const state = presenceChannel.presenceState()
+                    const next = Object.keys(state).reduce((acc, id) => {
+                        acc[id] = true
+                        return acc
+                    }, {})
+                    setOnlinePresence(next)
+                })
+                .subscribe(async (status) => {
+                    if (status === 'SUBSCRIBED' && !cancelled) {
+                        await presenceChannel.track({
+                            user_id: uid,
+                            at: new Date().toISOString()
+                        })
+                    }
+                })
+
+            presenceChannelRef.current = presenceChannel
+
+            if (inboxPlayerId && !cancelled) {
+                subscribeToPersonalInbox(inboxPlayerId)
+            }
+        }
+
+        startRealtime()
+
+        return () => {
+            cancelled = true
+            if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current)
+            if (socialChannelRef.current) {
+                supabase.removeChannel(socialChannelRef.current)
+                socialChannelRef.current = null
+            }
+            if (presenceChannelRef.current) {
+                supabase.removeChannel(presenceChannelRef.current)
+                presenceChannelRef.current = null
+            }
+            if (inboxChannelRef.current) {
+                supabase.removeChannel(inboxChannelRef.current)
+                inboxChannelRef.current = null
+            }
+            if (lobbyChannelRef.current) {
+                supabase.removeChannel(lobbyChannelRef.current)
+                lobbyChannelRef.current = null
+            }
+        }
+    }, [user?.id, player?.player_id])
 
     // Separate effect: reconnects to an active lobby once after login.
     // Guarded by a ref so it only fires once per session even if player updates.
     useEffect(() => {
         if (user && player?.current_lobby_id && !lobbyReconnectedRef.current && !activeLobby) {
             lobbyReconnectedRef.current = true
-            supabase
-                .from('lobbies')
-                .select('*')
-                .eq('id', player.current_lobby_id)
-                .single()
-                .then(({ data }) => {
-                    if (data) {
-                        setActiveLobby(data)
-                        subscribeToLobby(data.id)
-                    }
-                })
+            runWithSession(async () => {
+                const { data } = await supabase
+                    .from('lobbies')
+                    .select('*')
+                    .eq('id', player.current_lobby_id)
+                    .single()
+                if (data) {
+                    setActiveLobby(data)
+                    subscribeToLobby(data.id)
+                }
+            }).catch((err) => console.error('Lobby reconnect failed:', err.message))
         }
-    }, [user, player?.current_lobby_id])
+    }, [user?.id, player?.current_lobby_id])
 
     return (
         <RealtimeContext.Provider
@@ -724,6 +802,7 @@ export const RealtimeProvider = ({ children }) => {
                 lobbyMessages,
                 incomingInvite,
                 incomingJoinReq,
+                onlinePresence,
                 cooldowns,
                 setIncomingInvite,
                 setIncomingJoinReq,
@@ -731,9 +810,11 @@ export const RealtimeProvider = ({ children }) => {
                 sendFriendRequest,
                 acceptFriendRequest,
                 rejectFriendRequest,
+                cancelSentFriendRequest,
                 removeFriend,
                 hostLobby,
                 joinLobby,
+                hydrateLobbyFromInvite,
                 leaveLobby,
                 kickPlayer,
                 setLobbyPassword,

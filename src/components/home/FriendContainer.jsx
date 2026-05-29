@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { useRealtime } from '../../context/RealtimeContext'
-import { Search, Users, UserPlus, Play, Plus, ShieldAlert } from 'lucide-react'
+import { Search, Users, UserPlus, Play, Plus } from 'lucide-react'
 import { SearchModal } from './SearchModal'
 import { SocialModal } from './SocialModal'
 
 export const FriendContainer = () => {
-    const { friends, inviteFriend, sendJoinRequest, activeLobby, cooldowns } = useRealtime()
+    const { friends, inviteFriend, sendJoinRequest, activeLobby, cooldowns, onlinePresence } = useRealtime()
 
     const [isSearchOpen, setIsSearchOpen] = useState(false)
     const [isSocialOpen, setIsSocialOpen] = useState(false)
@@ -33,6 +33,12 @@ export const FriendContainer = () => {
         if (diffMins < 60) return `Offline (${diffMins}m ago)`
         if (diffHours < 24) return `Offline (${diffHours}h ago)`
         return `Offline (${diffDays}d ago)`
+    }
+
+    const getEffectiveStatus = (friend) => {
+        if (friend.current_status === 'Lobby') return 'Lobby'
+        if (onlinePresence?.[friend.id]) return 'Online'
+        return friend.current_status || 'Offline'
     }
 
     const getCooldownRemaining = (playerId) => {
@@ -68,7 +74,7 @@ export const FriendContainer = () => {
                     Friends Arena
                 </h3>
                 <span className="text-xs bg-[#3b82f6]/15 text-[#3b82f6] px-2 py-0.5 rounded-full font-semibold">
-                    {friends.filter(f => f.current_status !== 'Offline').length}/{friends.length}
+                    {friends.filter(f => getEffectiveStatus(f) !== 'Offline').length}/{friends.length}
                 </span>
             </div>
 
@@ -87,8 +93,8 @@ export const FriendContainer = () => {
                         })
                         .map((friend) => {
                             const cooldown = getCooldownRemaining(friend.id)
-                            const isFriendInLobby = friend.current_status === 'Lobby' && friend.current_lobby_id
-                            const amIHostOfActiveLobby = activeLobby && activeLobby.host_id !== friend.id 
+                            const effectiveStatus = getEffectiveStatus(friend)
+                            const isFriendInLobby = effectiveStatus === 'Lobby' && friend.current_lobby_id
 
                             return (
                                 <div
@@ -108,8 +114,8 @@ export const FriendContainer = () => {
                                                     {friend.player_name.substring(0, 2).toUpperCase()}
                                                 </div>
                                             )}
-                                            <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border border-[#171a21] ${friend.current_status === 'Online' ? 'bg-[#10b981]' :
-                                                    friend.current_status === 'Lobby' ? 'bg-[#f59e0b]' : 'bg-gray-500'
+                                            <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border border-[#171a21] ${effectiveStatus === 'Lobby' ? 'bg-[#f59e0b]' :
+                                                    effectiveStatus === 'Online' ? 'bg-[#10b981]' : 'bg-gray-500'
                                                 }`} />
                                         </div>
 
@@ -118,13 +124,13 @@ export const FriendContainer = () => {
                                                 {friend.player_name}
                                             </h4>
                                             <p className="text-[10px] text-[#94a3b8]/75 truncate mt-0.5">
-                                                {formatLastSeen(friend.current_status, friend.last_online)}
+                                                {formatLastSeen(effectiveStatus, friend.last_online)}
                                             </p>
                                         </div>
                                     </div>
 
                                     <div className="shrink-0 flex items-center">
-                                        {activeLobby && friend.current_status === 'Online' && (
+                                        {activeLobby && effectiveStatus === 'Online' && (
                                             cooldown > 0 ? (
                                                 <span className="text-[10px] font-bold text-[#3b82f6] bg-[#3b82f6]/10 border border-[#3b82f6]/30 px-2 py-1 rounded-lg">
                                                     {cooldown}s
