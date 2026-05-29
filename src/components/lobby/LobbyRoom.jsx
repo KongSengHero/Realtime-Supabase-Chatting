@@ -75,15 +75,25 @@ export const LobbyRoom = () => {
 
     const handleConfirmJoin = async () => {
         if (!incomingJoinReq || !activeLobby) return
-        const guestId = incomingJoinReq.playerId
-        const guestName = incomingJoinReq.playerName
-
+        const guestPublicId = incomingJoinReq.playerId
         try {
-            const state = activeLobby.lobby_state
+            // Resolve public player_id -> internal UUID
+            const { data: guestProfile, error: profErr } = await supabase
+                .from('players')
+                .select('id, player_id, player_name, profile_url')
+                .eq('player_id', guestPublicId)
+                .single()
+            if (profErr || !guestProfile) throw profErr || new Error('Player not found')
+
+            const guestUuid = guestProfile.id
+            const guestName = incomingJoinReq.playerName || guestProfile.player_name
+
+            const state = activeLobby.lobby_state || {}
             state.Players = state.Players || {}
-            state.Players[guestId] = {
-                id: Math.random().toString(36).substring(2, 10), 
+            state.Players[guestUuid] = {
+                id: Math.random().toString(16).substring(2, 10).toUpperCase(),
                 name: guestName,
+                profileUrl: guestProfile.profile_url,
                 isHost: false
             }
             const lobbySnapshot = { ...activeLobby, lobby_state: state }
@@ -93,7 +103,8 @@ export const LobbyRoom = () => {
                 .update({ lobby_state: state })
                 .eq('id', activeLobby.id)
 
-            const targetInbox = supabase.channel(`temp_confirm:${guestId}`)
+            // Notify guest via personal redirect channel (guest listens on personal_redirect:<UUID>)
+            const targetInbox = supabase.channel(`personal_redirect:${guestUuid}`)
             await targetInbox.subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
                     await targetInbox.send({
@@ -111,7 +122,7 @@ export const LobbyRoom = () => {
             await supabase
                 .from('players')
                 .update({ current_lobby_id: activeLobby.id, current_status: 'Lobby' })
-                .eq('id', guestId)
+                .eq('id', guestUuid)
 
         } catch (err) {
             console.error('Failed to confirm join request:', err.message)
@@ -123,8 +134,16 @@ export const LobbyRoom = () => {
     const handleDeclineJoin = async () => {
         if (!incomingJoinReq) return
         try {
-            const guestId = incomingJoinReq.playerId
-            const targetInbox = supabase.channel(`temp_decline:${guestId}`)
+            const guestPublicId = incomingJoinReq.playerId
+            const { data: guestProfile, error: profErr } = await supabase
+                .from('players')
+                .select('id')
+                .eq('player_id', guestPublicId)
+                .single()
+            if (profErr || !guestProfile) throw profErr || new Error('Player not found')
+            const guestUuid = guestProfile.id
+
+            const targetInbox = supabase.channel(`personal_redirect:${guestUuid}`)
             await targetInbox.subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
                     await targetInbox.send({

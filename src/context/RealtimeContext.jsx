@@ -29,6 +29,7 @@ export const RealtimeProvider = ({ children }) => {
     const presenceChannelRef = useRef(null)
     const SOCIAL_FETCH_MIN_MS = 8000
     const FRIEND_PLAYER_FIELDS = 'id, player_id, player_name, profile_url, current_status, current_lobby_id, last_online'
+    const makeHexId = () => Math.random().toString(16).substring(2, 10).toUpperCase()
     // Ref-based user snapshot so handlers can be called from realtime without stale closures
     const userRef = useRef(user)
     useEffect(() => { userRef.current = user }, [user])
@@ -125,6 +126,12 @@ export const RealtimeProvider = ({ children }) => {
                     return next
                 })
             }
+        }
+        // Ensure eventual consistency by refreshing the social snapshot (throttled).
+        try {
+            fetchSocialData()
+        } catch (err) {
+            console.error('Error triggering social snapshot refresh:', err?.message || err)
         }
     }
 
@@ -324,17 +331,8 @@ export const RealtimeProvider = ({ children }) => {
             return await runWithSession(async () => {
             const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase()
             const initialLobbyState = {
-                isPrivate: false,
-                password: null,
                 SessionId: Math.random().toString(36).substring(2, 10),
-                Players: {
-                    [user.id]: {
-                        id: player.player_id,
-                        name: player.player_name,
-                        profileUrl: player.profile_url,
-                        isHost: true
-                    }
-                }
+                Players: {}
             }
 
             // 1. Create the lobby
@@ -436,11 +434,11 @@ export const RealtimeProvider = ({ children }) => {
                 }
             }
 
-            // Add to lobby_state
+            // Add to lobby_state (guests only). Assign an 8-char hex ID for the player.
             const state = lobby.lobby_state || {}
             state.Players = state.Players || {}
             state.Players[user.id] = {
-                id: player.player_id,
+                id: makeHexId(),
                 name: player.player_name,
                 profileUrl: player.profile_url,
                 isHost: false
@@ -651,7 +649,7 @@ export const RealtimeProvider = ({ children }) => {
 
         try {
             // Send broadcast on friend's inbox channel (uses public player_id)
-            const targetInbox = supabase.channel(`temp_invite:${friendId}`)
+            const targetInbox = supabase.channel(`user_inbox:${friendId}`)
             await targetInbox.subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
                     await targetInbox.send({
@@ -691,7 +689,7 @@ export const RealtimeProvider = ({ children }) => {
 
         try {
             // Send broadcast to friend's mailbox (uses public player_id)
-            const targetInbox = supabase.channel(`temp_req:${friendId}`)
+            const targetInbox = supabase.channel(`user_inbox:${friendId}`)
             await targetInbox.subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
                     await targetInbox.send({
