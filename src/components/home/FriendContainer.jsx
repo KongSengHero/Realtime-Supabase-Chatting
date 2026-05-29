@@ -44,7 +44,7 @@ export const FriendContainer = () => {
     }
 
     const handleInvite = async (friend) => {
-        const res = await inviteFriend(friend.id)
+        const res = await inviteFriend(friend.player_id)
         if (!res.success) {
             alert(res.message)
         }
@@ -52,7 +52,7 @@ export const FriendContainer = () => {
 
     const handleAskToJoin = async (friend) => {
         if (!friend.current_lobby_id) return
-        const res = await sendJoinRequest(friend.id, friend.current_lobby_id)
+        const res = await sendJoinRequest(friend.player_id, friend.current_lobby_id)
         if (res.success) {
             alert('Join request sent to ' + friend.player_name)
         } else {

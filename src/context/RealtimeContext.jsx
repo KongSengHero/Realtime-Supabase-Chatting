@@ -542,6 +542,8 @@ export const RealtimeProvider = ({ children }) => {
     // ─────────────────────────────────────────────────────────
 
     // Set up personal broadcast mailbox for invites/join requests
+    // Subscribe to the personal inbox channel using the public `player_id`.
+    // `userId` here is expected to be the public `player_id` (string) when available.
     const subscribeToPersonalInbox = (userId) => {
         if (inboxChannelRef.current) {
             supabase.removeChannel(inboxChannelRef.current)
@@ -563,6 +565,7 @@ export const RealtimeProvider = ({ children }) => {
     }
 
     // Send Invite to Friend (10s Cooldown enforced)
+    // `friendId` should be the friend's public `player_id` (not the DB PK)
     const inviteFriend = async (friendId) => {
         if (!activeLobby || !user || !player) return { success: false, message: 'No active lobby' }
 
@@ -577,7 +580,7 @@ export const RealtimeProvider = ({ children }) => {
         setCooldowns(prev => ({ ...prev, [friendId]: now }))
 
         try {
-            // Send broadcast on friend's inbox channel
+            // Send broadcast on friend's inbox channel (uses public player_id)
             const targetInbox = supabase.channel(`temp_invite:${friendId}`)
             await targetInbox.subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
@@ -588,7 +591,7 @@ export const RealtimeProvider = ({ children }) => {
                             lobbyId: activeLobby.id,
                             joinCode: activeLobby.join_code,
                             hostName: player.player_name,
-                            hostId: user.id
+                            hostId: player.player_id
                         }
                     })
                     supabase.removeChannel(targetInbox)
@@ -602,6 +605,7 @@ export const RealtimeProvider = ({ children }) => {
     }
 
     // Send Join Request to Friend inside a lobby (10s Cooldown enforced)
+    // `friendId` should be the friend's public `player_id` (not the DB PK)
     const sendJoinRequest = async (friendId, friendLobbyId) => {
         if (!user || !player) return { success: false, message: 'Not logged in' }
 
@@ -616,7 +620,7 @@ export const RealtimeProvider = ({ children }) => {
         setCooldowns(prev => ({ ...prev, [friendId]: now }))
 
         try {
-            // Send broadcast to friend's mailbox
+            // Send broadcast to friend's mailbox (uses public player_id)
             const targetInbox = supabase.channel(`temp_req:${friendId}`)
             await targetInbox.subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
@@ -626,7 +630,7 @@ export const RealtimeProvider = ({ children }) => {
                         payload: {
                             lobbyId: friendLobbyId,
                             playerName: player.player_name,
-                            playerId: user.id
+                            playerId: player.player_id
                         }
                     })
                     supabase.removeChannel(targetInbox)
@@ -647,11 +651,14 @@ export const RealtimeProvider = ({ children }) => {
     const lobbyReconnectedRef = useRef(false)
 
     // Primary effect: runs when user logs in/out. Sets up social data + realtime subscriptions.
-    // Does NOT depend on player so that refreshProfile() cannot trigger a re-run loop.
+    // Includes `player?.player_id` so we can subscribe to the personal inbox using the
+    // public `player_id` once the profile has been fetched.
     useEffect(() => {
         if (user) {
             fetchSocialData()
-            subscribeToPersonalInbox(user.id)
+            // Prefer the public player identifier when available to avoid exposing DB PKs
+            const inboxId = player?.player_id || user.id
+            subscribeToPersonalInbox(inboxId)
             lobbyReconnectedRef.current = false // reset reconnect flag on new login
 
             // Listen for general database table changes for friendships & friend requests
@@ -687,7 +694,7 @@ export const RealtimeProvider = ({ children }) => {
             setIncomingInvite(null)
             setIncomingJoinReq(null)
         }
-    }, [user])
+    }, [user, player?.player_id])
 
     // Separate effect: reconnects to an active lobby once after login.
     // Guarded by a ref so it only fires once per session even if player updates.

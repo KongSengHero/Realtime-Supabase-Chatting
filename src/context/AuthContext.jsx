@@ -58,15 +58,19 @@ export const AuthProvider = ({ children }) => {
     }
 
     // ─── Realtime Row Subscription (session lock monitor) ────────────────────────
-    const subscribeToPlayerRow = (userId) => {
+    // Subscribe to updates on the player's row. Prefer subscribing by public `player_id`
+    // when available to avoid exposing the DB primary key in network requests.
+    const subscribeToPlayerRow = (userId, playerPublicId) => {
         if (playerSubRef.current) {
             supabase.removeChannel(playerSubRef.current)
         }
+        const topicId = playerPublicId || userId
+        const filter = playerPublicId ? `player_id=eq.${playerPublicId}` : `id=eq.${userId}`
         const channel = supabase
-            .channel(`self_profile:${userId}`)
+            .channel(`self_profile:${topicId}`)
             .on(
                 'postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'players', filter: `id=eq.${userId}` },
+                { event: 'UPDATE', schema: 'public', table: 'players', filter },
                 (payload) => {
                     setPlayer(payload.new)
                     // Lockout check: only fires when DB row changes, not on a timer
@@ -220,7 +224,7 @@ export const AuthProvider = ({ children }) => {
             await initializeTabSession(currentUser.id)
             // record the time we last updated `last_online` during session init
             lastHeartbeatRef.current = Date.now()
-            subscribeToPlayerRow(currentUser.id)
+            subscribeToPlayerRow(currentUser.id, profile.player_id)
         }
         setLoading(false)
     }
