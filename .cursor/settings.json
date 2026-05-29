@@ -2,6 +2,9 @@
   "plugins": {
     "supabase": {
       "enabled": true
+    },
+    "superpowers": {
+      "enabled": true
     }
   }
 }

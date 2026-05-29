@@ -25,10 +25,10 @@ dist-ssr
 
 
 
-
-dist/
-MyPrompts/
-node_modules/
+.cursor
+dist
+MyPrompts
+node_modules
 .env
 package-lock.json
 schema.sql
