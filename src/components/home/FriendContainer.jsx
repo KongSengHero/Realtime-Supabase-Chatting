@@ -7,11 +7,9 @@ import { SocialModal } from './SocialModal'
 export const FriendContainer = () => {
     const { friends, inviteFriend, sendJoinRequest, activeLobby, cooldowns } = useRealtime()
 
-    // Modals state
     const [isSearchOpen, setIsSearchOpen] = useState(false)
     const [isSocialOpen, setIsSocialOpen] = useState(false)
 
-    // Local timers to force re-render for cooldowns every second
     const [tick, setTick] = useState(0)
 
     useEffect(() => {
@@ -21,7 +19,6 @@ export const FriendContainer = () => {
         return () => clearInterval(timer)
     }, [])
 
-    // Format "Last Seen" string
     const formatLastSeen = (status, lastOnline) => {
         if (status === 'Online') return 'Online'
         if (status === 'Lobby') return 'In Lobby'
@@ -38,7 +35,6 @@ export const FriendContainer = () => {
         return `Offline (${diffDays}d ago)`
     }
 
-    // Calculate remaining cooldown in seconds for a given player ID
     const getCooldownRemaining = (playerId) => {
         const lastAction = cooldowns[playerId]
         if (!lastAction) return 0
@@ -47,7 +43,6 @@ export const FriendContainer = () => {
         return remaining > 0 ? Math.ceil(remaining / 1000) : 0
     }
 
-    // Handle invite trigger
     const handleInvite = async (friend) => {
         const res = await inviteFriend(friend.id)
         if (!res.success) {
@@ -55,7 +50,6 @@ export const FriendContainer = () => {
         }
     }
 
-    // Handle ask-to-join trigger
     const handleAskToJoin = async (friend) => {
         if (!friend.current_lobby_id) return
         const res = await sendJoinRequest(friend.id, friend.current_lobby_id)
@@ -68,8 +62,6 @@ export const FriendContainer = () => {
 
     return (
         <div className="w-52 bg-[#171a21] border-r border-[#2a475e]/60 flex flex-col h-full relative z-10 shrink-0">
-
-            {/* Title Header */}
             <div className="p-4 border-b border-[#2a475e]/60 flex items-center justify-between bg-[#101216]/40">
                 <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2 m-0">
                     <Users className="w-4 h-4 text-[#3b82f6]" />
@@ -80,7 +72,6 @@ export const FriendContainer = () => {
                 </span>
             </div>
 
-            {/* Friends list container */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
                 {friends.length === 0 ? (
                     <div className="text-center py-12 text-[#64748b] px-4">
@@ -91,21 +82,19 @@ export const FriendContainer = () => {
                 ) : (
                     friends
                         .sort((a, b) => {
-                            // Online first, then Lobby, then Offline
                             const statusWeight = { Online: 0, Lobby: 1, Offline: 2 }
                             return (statusWeight[a.current_status] || 2) - (statusWeight[b.current_status] || 2)
                         })
                         .map((friend) => {
                             const cooldown = getCooldownRemaining(friend.id)
                             const isFriendInLobby = friend.current_status === 'Lobby' && friend.current_lobby_id
-                            const amIHostOfActiveLobby = activeLobby && activeLobby.host_id !== friend.id // Can invite
+                            const amIHostOfActiveLobby = activeLobby && activeLobby.host_id !== friend.id 
 
                             return (
                                 <div
                                     key={friend.id}
                                     className="flex items-center justify-between p-2.5 bg-[#0e141d]/40 hover:bg-[#0e141d]/80 border border-[#2a475e]/25 hover:border-[#2a475e]/50 rounded-xl transition-all group"
                                 >
-                                    {/* Left Info */}
                                     <div className="flex items-center gap-2.5 overflow-hidden">
                                         <div className="relative shrink-0">
                                             {friend.profile_url ? (
@@ -119,7 +108,6 @@ export const FriendContainer = () => {
                                                     {friend.player_name.substring(0, 2).toUpperCase()}
                                                 </div>
                                             )}
-                                            {/* Status indicator badge */}
                                             <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border border-[#171a21] ${friend.current_status === 'Online' ? 'bg-[#10b981]' :
                                                     friend.current_status === 'Lobby' ? 'bg-[#f59e0b]' : 'bg-gray-500'
                                                 }`} />
@@ -135,9 +123,7 @@ export const FriendContainer = () => {
                                         </div>
                                     </div>
 
-                                    {/* Quick Action Button Box */}
                                     <div className="shrink-0 flex items-center">
-                                        {/* Invite Button (+) popped when current user is in a lobby and friend is online/idle */}
                                         {activeLobby && friend.current_status === 'Online' && (
                                             cooldown > 0 ? (
                                                 <span className="text-[10px] font-bold text-[#3b82f6] bg-[#3b82f6]/10 border border-[#3b82f6]/30 px-2 py-1 rounded-lg">
@@ -153,8 +139,6 @@ export const FriendContainer = () => {
                                                 </button>
                                             )
                                         )}
-
-                                        {/* Ask to Join Button (>) popped when friend is in lobby, and we are not in a lobby */}
                                         {!activeLobby && isFriendInLobby && (
                                             cooldown > 0 ? (
                                                 <span className="text-[10px] font-bold text-[#f59e0b] bg-[#f59e0b]/10 border border-[#f59e0b]/30 px-2 py-1 rounded-lg">
@@ -177,7 +161,6 @@ export const FriendContainer = () => {
                 )}
             </div>
 
-            {/* Social and Search Actions */}
             <div className="p-4 border-t border-[#2a475e]/60 bg-[#101216]/40 flex gap-2">
                 <button
                     onClick={() => setIsSearchOpen(true)}
@@ -195,10 +178,8 @@ export const FriendContainer = () => {
                 </button>
             </div>
 
-            {/* Modals injection */}
             <SearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
             <SocialModal isOpen={isSocialOpen} onClose={() => setIsSocialOpen(false)} />
-
         </div>
     )
 }

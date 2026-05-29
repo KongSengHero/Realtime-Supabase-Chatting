@@ -4,7 +4,7 @@ import { Users, UserMinus, UserCheck, UserX, X, Heart, Clock } from 'lucide-reac
 
 export const SocialModal = ({ isOpen, onClose }) => {
     const { friends, friendRequests, acceptFriendRequest, rejectFriendRequest, removeFriend } = useRealtime()
-    const [activeTab, setActiveTab] = useState('friends') // 'friends' | 'received' | 'sent'
+    const [activeTab, setActiveTab] = useState('friends') 
 
     if (!isOpen) return null
 
@@ -17,8 +17,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#101216]/80 backdrop-blur-md animate-fade-in">
             <div className="w-full max-w-125 bg-[#171a21] border border-[#2a475e] rounded-2xl p-6 shadow-2xl flex flex-col max-h-[85vh] animate-slide-in-up">
-
-                {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-xl font-bold text-white m-0 flex items-center gap-2">
                         <Users className="w-5 h-5 text-[#3b82f6]" />
@@ -31,8 +29,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
                         <X className="w-5 h-5" />
                     </button>
                 </div>
-
-                {/* Tabs navigation */}
                 <div className="flex border-b border-[#2a475e]/50 mb-4">
                     {tabs.map((tab) => {
                         const Icon = tab.icon
@@ -52,10 +48,7 @@ export const SocialModal = ({ isOpen, onClose }) => {
                     })}
                 </div>
 
-                {/* Tab Content (Scrollable list) */}
                 <div className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-62.5">
-
-                    {/* FRIENDS TAB */}
                     {activeTab === 'friends' && (
                         friends.length === 0 ? (
                             <div className="text-center py-12 text-[#64748b]">
@@ -78,7 +71,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
                                                     {friend.player_name.substring(0, 2).toUpperCase()}
                                                 </div>
                                             )}
-                                            {/* Status dot */}
                                             <span className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#171a21] ${friend.current_status === 'Online' ? 'bg-[#10b981]' :
                                                     friend.current_status === 'Lobby' ? 'bg-[#f59e0b]' : 'bg-gray-500'
                                                 }`} />
@@ -88,7 +80,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
                                             <p className="text-xs text-[#64748b] mt-0.5 font-medium">ID: {friend.player_id}</p>
                                         </div>
                                     </div>
-
                                     <button
                                         onClick={() => removeFriend(friend.id)}
                                         title="Remove Friend"
@@ -101,7 +92,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
                         )
                     )}
 
-                    {/* RECEIVED TAB */}
                     {activeTab === 'received' && (
                         friendRequests.received.length === 0 ? (
                             <div className="text-center py-12 text-[#64748b]">
@@ -127,7 +117,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
                                             <p className="text-xs text-[#64748b] mt-0.5">Wants to be friends</p>
                                         </div>
                                     </div>
-
                                     <div className="flex gap-2">
                                         <button
                                             onClick={() => acceptFriendRequest(req.id)}
@@ -147,7 +136,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
                         )
                     )}
 
-                    {/* SENT TAB */}
                     {activeTab === 'sent' && (
                         friendRequests.sent.length === 0 ? (
                             <div className="text-center py-12 text-[#64748b]">
@@ -173,9 +161,8 @@ export const SocialModal = ({ isOpen, onClose }) => {
                                             <p className="text-xs text-[#64748b] mt-0.5">Awaiting response</p>
                                         </div>
                                     </div>
-
                                     <button
-                                        onClick={() => rejectFriendRequest(req.id)} // Canceling is equivalent to rejecting request from requester-side
+                                        onClick={() => rejectFriendRequest(req.id)} 
                                         title="Cancel Request"
                                         className="p-2 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 text-[#94a3b8] hover:text-red-400 rounded-lg transition-all cursor-pointer"
                                     >
@@ -185,7 +172,6 @@ export const SocialModal = ({ isOpen, onClose }) => {
                             ))
                         )
                     )}
-
                 </div>
             </div>
         </div>

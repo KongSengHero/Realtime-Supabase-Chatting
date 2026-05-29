@@ -6,7 +6,7 @@ export const SearchModal = ({ isOpen, onClose }) => {
     const { sendFriendRequest } = useRealtime()
     const [searchTerm, setSearchTerm] = useState('')
     const [loading, setLoading] = useState(false)
-    const [feedback, setFeedback] = useState(null) // { type: 'success' | 'error', message: string }
+    const [feedback, setFeedback] = useState(null) 
 
     if (!isOpen) return null
 

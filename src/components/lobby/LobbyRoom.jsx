@@ -25,12 +25,10 @@ export const LobbyRoom = () => {
     const isHost = activeLobby?.host_id === user?.id
     const isLobbyPrivate = activeLobby?.is_private
 
-    // Scroll chat messages to bottom
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [lobbyMessages])
 
-    // Handle invite timers (expires in 10s)
     useEffect(() => {
         if (incomingInvite) {
             const timer = setTimeout(() => {
@@ -49,7 +47,6 @@ export const LobbyRoom = () => {
         }
     }, [incomingJoinReq])
 
-    // Handle Copy Join Code
     const handleCopyCode = () => {
         if (!activeLobby?.join_code) return
         navigator.clipboard.writeText(activeLobby.join_code)
@@ -57,7 +54,6 @@ export const LobbyRoom = () => {
         setTimeout(() => setCopied(false), 2000)
     }
 
-    // Handle Host locks the lobby
     const handleLockSubmit = (e) => {
         e.preventDefault()
         if (!passwordInput.trim()) return
@@ -66,12 +62,10 @@ export const LobbyRoom = () => {
         setIsLocking(false)
     }
 
-    // Handle Host unlocks the lobby
     const handleUnlock = () => {
         removeLobbyPassword()
     }
 
-    // Handle chat sending
     const handleSendMessage = (e) => {
         e.preventDefault()
         if (!message.trim()) return
@@ -79,29 +73,25 @@ export const LobbyRoom = () => {
         setMessage('')
     }
 
-    // Host confirms guest join request
     const handleConfirmJoin = async () => {
         if (!incomingJoinReq || !activeLobby) return
         const guestId = incomingJoinReq.playerId
         const guestName = incomingJoinReq.playerName
 
         try {
-            // 1. Add guest to lobbies table state
             const state = activeLobby.lobby_state
             state.Players = state.Players || {}
             state.Players[guestId] = {
-                id: Math.random().toString(36).substring(2, 10), // mock random 16 digit placeholder or actual
+                id: Math.random().toString(36).substring(2, 10), 
                 name: guestName,
                 isHost: false
             }
 
-            // Update in DB
             await supabase
                 .from('lobbies')
                 .update({ lobby_state: state })
                 .eq('id', activeLobby.id)
 
-            // 2. Broadcast join confirmation to guest's personal inbox
             const targetInbox = supabase.channel(`temp_confirm:${guestId}`)
             await targetInbox.subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
@@ -114,7 +104,6 @@ export const LobbyRoom = () => {
                 }
             })
 
-            // Update host guest list in players profile
             await supabase
                 .from('players')
                 .update({ current_lobby_id: activeLobby.id, current_status: 'Lobby' })
@@ -130,7 +119,6 @@ export const LobbyRoom = () => {
     const handleDeclineJoin = async () => {
         if (!incomingJoinReq) return
         try {
-            // Broadcast decline to guest's inbox
             const guestId = incomingJoinReq.playerId
             const targetInbox = supabase.channel(`temp_decline:${guestId}`)
             await targetInbox.subscribe(async (status) => {
@@ -162,8 +150,6 @@ export const LobbyRoom = () => {
 
     return (
         <div className="flex-1 bg-[#101216] flex flex-col h-full relative overflow-hidden">
-
-            {/* FLOATING BANNER: INCOMING LOBBY INVITATION */}
             {incomingInvite && (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-100 bg-[#171a21]/95 border border-[#3b82f6] rounded-xl p-4 shadow-xl shadow-[#3b82f6]/10 animate-slide-in-up backdrop-blur-md">
                     <div className="flex items-start gap-3">
@@ -192,7 +178,6 @@ export const LobbyRoom = () => {
                 </div>
             )}
 
-            {/* FLOATING BANNER: INCOMING GUEST JOIN REQUEST */}
             {incomingJoinReq && isHost && (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-100 bg-[#171a21]/95 border border-[#f59e0b] rounded-xl p-4 shadow-xl shadow-[#f59e0b]/10 animate-slide-in-up backdrop-blur-md">
                     <div className="flex items-start gap-3">
@@ -221,10 +206,7 @@ export const LobbyRoom = () => {
                 </div>
             )}
 
-            {/* Lobby Header Panel */}
             <div className="p-4 border-b border-[#2a475e]/60 flex items-center justify-between bg-[#171a21]/50 backdrop-blur-md relative z-10">
-
-                {/* Room information */}
                 <div className="flex items-center gap-4">
                     <div className="shrink-0 flex items-center gap-1.5 bg-[#3b82f6]/10 border border-[#3b82f6]/30 px-3 py-1.5 rounded-xl">
                         <span className="text-[10px] font-bold text-[#3b82f6] uppercase tracking-wider">Lobby Code</span>
@@ -237,8 +219,6 @@ export const LobbyRoom = () => {
                             {copied ? <Check className="w-3.5 h-3.5 text-[#10b981]" /> : <Copy className="w-3.5 h-3.5" />}
                         </button>
                     </div>
-
-                    {/* Privacy badge */}
                     {isLobbyPrivate ? (
                         <span className="text-[10px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1">
                             <Lock className="w-3 h-3" /> Private
@@ -248,16 +228,12 @@ export const LobbyRoom = () => {
                             <Unlock className="w-3 h-3" /> Public
                         </span>
                     )}
-
-                    {/* Lobby Type */}
                     <span className="text-[10px] font-bold text-[#94a3b8] bg-[#2a475e]/25 border border-[#2a475e]/40 px-2.5 py-1 rounded-full uppercase tracking-wider">
                         {activeLobby?.lobby_type}
                     </span>
                 </div>
 
-                {/* Action Panel */}
                 <div className="flex items-center gap-3">
-                    {/* Host lock controls */}
                     {isHost && activeLobby?.lobby_type !== 'Anonymous' && (
                         <div className="flex gap-2">
                             {isLobbyPrivate ? (
@@ -279,14 +255,11 @@ export const LobbyRoom = () => {
                             )}
                         </div>
                     )}
-
-                    {/* Host Anonymous Warning */}
                     {activeLobby?.lobby_type === 'Anonymous' && (
                         <span className="text-[10px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-full uppercase tracking-wider">
                             Solo Private Sandbox
                         </span>
                     )}
-
                     <button
                         onClick={leaveLobby}
                         className="py-1.5 px-3.5 bg-red-500 hover:bg-red-600 text-white rounded-xl text-xs font-bold tracking-wider uppercase transition-colors flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
@@ -297,7 +270,6 @@ export const LobbyRoom = () => {
                 </div>
             </div>
 
-            {/* Lock Lobby Modal Overlay */}
             {isLocking && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#101216]/80 backdrop-blur-sm animate-fade-in">
                     <div className="w-full max-w-90 bg-[#171a21] border border-[#2a475e] rounded-2xl p-5 shadow-2xl animate-slide-in-up">
@@ -340,13 +312,8 @@ export const LobbyRoom = () => {
                 </div>
             )}
 
-            {/* Middle Layout Pane: Left Chat Board, Right Player Presence */}
             <div className="flex-1 flex overflow-hidden">
-
-                {/* Left: Chat Box Area */}
                 <div className="flex-1 flex flex-col h-full bg-[#101216]">
-
-                    {/* Scrollable messages container */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-3">
                         {lobbyMessages.length === 0 ? (
                             <div className="h-full flex flex-col items-center justify-center text-[#64748b] text-center max-w-70 mx-auto">
@@ -362,7 +329,6 @@ export const LobbyRoom = () => {
                                         key={idx}
                                         className={`flex items-start gap-2.5 max-w-[85%] ${isMe ? 'ml-auto flex-row-reverse' : ''} animate-fade-in`}
                                     >
-                                        {/* Avatar */}
                                         {msg.profileUrl ? (
                                             <img src={msg.profileUrl} alt="" className="w-8 h-8 rounded-lg object-cover border border-[#2a475e]/50" />
                                         ) : (
@@ -370,8 +336,6 @@ export const LobbyRoom = () => {
                                                 {msg.senderName.substring(0, 2).toUpperCase()}
                                             </div>
                                         )}
-
-                                        {/* Speech box */}
                                         <div>
                                             <div className={`flex items-center gap-1.5 mb-1 ${isMe ? 'justify-end' : ''}`}>
                                                 <span className="text-[10px] font-bold text-white">{msg.senderName}</span>
@@ -395,7 +359,6 @@ export const LobbyRoom = () => {
                         <div ref={messagesEndRef} />
                     </div>
 
-                    {/* Bottom Chat Inputs */}
                     {activeLobby?.lobby_type !== 'Anonymous' ? (
                         <form onSubmit={handleSendMessage} className="p-3 border-t border-[#2a475e]/60 bg-[#171a21]/50 backdrop-blur-md flex gap-2">
                             <input
@@ -418,17 +381,13 @@ export const LobbyRoom = () => {
                             Solo room. Chat is disabled.
                         </div>
                     )}
-
                 </div>
 
-                {/* Right: Presence Player List inside Room */}
                 <div className="w-55 bg-[#171a21] border-l border-[#2a475e]/60 flex flex-col h-full shrink-0">
-
                     <div className="p-3 border-b border-[#2a475e]/60 bg-[#101216]/20 flex items-center gap-1.5 shrink-0">
                         <Users className="w-3.5 h-3.5 text-[#3b82f6]" />
                         <h4 className="text-[10px] font-bold text-white uppercase tracking-wider m-0">Players ({Object.keys(players).length})</h4>
                     </div>
-
                     <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
                         {Object.entries(players).map(([uuid, p]) => {
                             const isPlayerHost = activeLobby?.host_id === uuid
@@ -438,7 +397,6 @@ export const LobbyRoom = () => {
                                     className="flex items-center justify-between p-2 bg-[#0e141d]/50 border border-[#2a475e]/15 rounded-lg"
                                 >
                                     <div className="flex items-center gap-2 overflow-hidden">
-                                        {/* Avatar */}
                                         {p.profileUrl ? (
                                             <img src={p.profileUrl} alt="" className="w-7 h-7 rounded object-cover border border-[#2a475e]/30" />
                                         ) : (
@@ -446,7 +404,6 @@ export const LobbyRoom = () => {
                                                 {p.name.substring(0, 2).toUpperCase()}
                                             </div>
                                         )}
-
                                         <div className="overflow-hidden">
                                             <h5 className="text-[10px] font-bold text-white truncate m-0 leading-tight flex items-center gap-1">
                                                 {p.name}
@@ -457,8 +414,6 @@ export const LobbyRoom = () => {
                                             </span>
                                         </div>
                                     </div>
-
-                                    {/* Host actions next to guests */}
                                     {isHost && !isPlayerHost && (
                                         <button
                                             onClick={() => kickPlayer(uuid)}
@@ -472,11 +427,8 @@ export const LobbyRoom = () => {
                             )
                         })}
                     </div>
-
                 </div>
-
             </div>
-
         </div>
     )
 }

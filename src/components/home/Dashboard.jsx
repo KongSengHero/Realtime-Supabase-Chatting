@@ -13,14 +13,12 @@ export const Dashboard = () => {
     const { player, signOut, isLockedOut, stealSession, deleteAccount, signInWithGoogle } = useAuth()
     const { activeLobby, hostLobby, joinLobby } = useRealtime()
 
-    // Host/Join states
     const [joinCodeInput, setJoinCodeInput] = useState('')
     const [joinPasswordInput, setJoinPasswordInput] = useState('')
     const [showPasswordPrompt, setShowPasswordPrompt] = useState(false)
     const [loading, setLoading] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-    // Listen for real-time join confirmations on personal inbox channel
     useEffect(() => {
         if (!player) return
 
@@ -37,19 +35,15 @@ export const Dashboard = () => {
             })
             .subscribe()
 
-        return () => {
-            supabase.removeChannel(confirmChannel)
-        }
+        return () => supabase.removeChannel(confirmChannel); 
     }, [player])
 
-    // Handle Host Lobby click
     const handleHost = async (type) => {
         setLoading(true)
         await hostLobby(type)
         setLoading(false)
     }
 
-    // Handle Join Lobby submit
     const handleJoin = async (e) => {
         e.preventDefault()
         if (!joinCodeInput.trim()) return
@@ -71,7 +65,6 @@ export const Dashboard = () => {
         }
     }
 
-    // Handle Delete Account confirmed
     const handleDeleteAccount = async () => {
         const success = await deleteAccount()
         if (success) {
@@ -82,25 +75,18 @@ export const Dashboard = () => {
 
     return (
         <div className="flex h-screen w-screen bg-[#101216] overflow-hidden relative">
-
-            {/* ─────────────────────────────────────────────────────────
-          1. ACTIVE TAB LOCKOUT OVERLAY (FULL SCREEN BLUR GLASS)
-          ───────────────────────────────────────────────────────── */}
             {isLockedOut && (
                 <div className="fixed inset-0 z-100 flex items-center justify-center p-4 bg-[#101216]/90 backdrop-blur-xl animate-fade-in">
                     <div className="w-full max-w-120 bg-[#171a21]/90 border border-red-500/30 rounded-2xl p-8 shadow-2xl shadow-red-500/5 text-center animate-slide-in-up">
                         <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/40 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-red-500/10">
                             <ShieldAlert className="w-8 h-8 text-red-500" />
                         </div>
-
                         <h1 className="text-2xl font-bold text-white m-0 tracking-tight">
                             Active Session Interrupted
                         </h1>
-
                         <p className="text-[#94a3b8] text-sm mt-3 leading-relaxed font-medium">
                             Your account is currently open in another browser tab. To maintain real-time sync, you can only operate in one active tab at a time.
                         </p>
-
                         <div className="mt-8 space-y-3">
                             <button
                                 onClick={stealSession}
@@ -109,7 +95,6 @@ export const Dashboard = () => {
                                 <RefreshCw className="w-4 h-4" />
                                 Use Here Instead
                             </button>
-
                             <button
                                 onClick={signOut}
                                 className="w-full py-3 bg-[#0e141d] hover:bg-[#1b2838] border border-[#2a475e]/80 text-[#94a3b8] hover:text-white rounded-xl text-sm font-semibold transition-all cursor-pointer"
@@ -121,9 +106,6 @@ export const Dashboard = () => {
                 </div>
             )}
 
-            {/* ─────────────────────────────────────────────────────────
-          2. DELETE ACCOUNT CONFIRMATION MODAL
-          ───────────────────────────────────────────────────────── */}
             {showDeleteConfirm && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#101216]/85 backdrop-blur-md animate-fade-in">
                     <div className="w-full max-w-100 bg-[#171a21] border border-red-500/30 rounded-2xl p-6 shadow-2xl animate-slide-in-up">
@@ -152,15 +134,10 @@ export const Dashboard = () => {
                 </div>
             )}
 
-            {/* Left Navigation: FriendContainer Panel */}
             <FriendContainer />
 
-            {/* Right Dashboard panel workspace */}
             <div className="grow flex flex-col h-full overflow-hidden">
-
-                {/* Header Dashboard Area */}
                 <div className="p-4 border-b border-[#2a475e]/60 bg-[#171a21] flex items-center justify-between shrink-0 relative z-10">
-                    {/* Profile details */}
                     <div className="flex items-center gap-3">
                         {player?.profile_url ? (
                             <img
@@ -173,7 +150,6 @@ export const Dashboard = () => {
                                 {player?.player_name ? player.player_name.substring(0, 2).toUpperCase() : 'GP'}
                             </div>
                         )}
-
                         <div>
                             <h2 className="text-base font-bold text-white m-0 leading-tight flex items-center gap-1.5">
                                 {player?.player_name}
@@ -193,9 +169,7 @@ export const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* Action buttons */}
                     <div className="flex items-center gap-3">
-                        {/* Merging Account button triggered only for anonymous */}
                         {player?.is_anonymous && (
                             <button
                                 onClick={signInWithGoogle}
@@ -205,8 +179,6 @@ export const Dashboard = () => {
                                 Link Google Account
                             </button>
                         )}
-
-                        {/* Account Delete button */}
                         <button
                             onClick={() => setShowDeleteConfirm(true)}
                             title="Delete Account Permanently"
@@ -214,8 +186,6 @@ export const Dashboard = () => {
                         >
                             <Trash2 className="w-4 h-4" />
                         </button>
-
-                        {/* Logout button */}
                         <button
                             onClick={signOut}
                             className="py-1.5 px-3.5 bg-[#0e141d] hover:bg-[#1b2838] border border-[#2a475e] text-[#94a3b8] hover:text-white rounded-xl text-xs font-bold uppercase transition-colors flex items-center gap-1.5 cursor-pointer active:scale-95"
@@ -226,17 +196,12 @@ export const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* Workspace Display */}
                 <div className="flex-1 min-h-0 bg-[#101216]">
                     {activeLobby ? (
                         <LobbyRoom />
                     ) : (
-                        /* Standard Dashboard Welcome Cards */
                         <div className="h-full flex items-center justify-center p-8 overflow-y-auto">
-
                             <div className="w-full max-w-150 grid grid-cols-1 md:grid-cols-2 gap-6 animate-slide-in-up">
-
-                                {/* 1. Host Lobby Action Card */}
                                 <div className="glass-panel border-[#2a475e]/60 rounded-2xl p-6 flex flex-col justify-between hover:border-[#3b82f6]/60 transition-all group">
                                     <div>
                                         <div className="w-12 h-12 rounded-xl bg-[#3b82f6]/10 border border-[#3b82f6]/20 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
@@ -247,7 +212,6 @@ export const Dashboard = () => {
                                             Host a game arena where you can invite friends, chat in real-time, configure passwords, and manage players.
                                         </p>
                                     </div>
-
                                     <div className="mt-8 space-y-2">
                                         <button
                                             onClick={() => handleHost('Champion')}
@@ -257,7 +221,6 @@ export const Dashboard = () => {
                                             <Plus className="w-3.5 h-3.5" />
                                             Host Champion Lobby
                                         </button>
-
                                         <button
                                             onClick={() => handleHost('Anonymous')}
                                             disabled={loading}
@@ -270,7 +233,6 @@ export const Dashboard = () => {
                                     </div>
                                 </div>
 
-                                {/* 2. Join Lobby Action Card */}
                                 <div className="glass-panel border-[#2a475e]/60 rounded-2xl p-6 flex flex-col justify-between hover:border-[#3b82f6]/60 transition-all group">
                                     <div>
                                         <div className="w-12 h-12 rounded-xl bg-[#3b82f6]/10 border border-[#3b82f6]/20 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
@@ -292,8 +254,6 @@ export const Dashboard = () => {
                                             className="w-full pl-3 pr-3 py-2 bg-[#0e141d] border border-[#2a475e] rounded-xl text-xs text-white placeholder-[#64748b] focus:outline-none focus:border-[#3b82f6] font-semibold tracking-wider text-center"
                                             required
                                         />
-
-                                        {/* Password input shown if incorrect password trigger */}
                                         {showPasswordPrompt && (
                                             <input
                                                 type="password"
@@ -304,7 +264,6 @@ export const Dashboard = () => {
                                                 required
                                             />
                                         )}
-
                                         <button
                                             type="submit"
                                             disabled={loading}
@@ -315,15 +274,11 @@ export const Dashboard = () => {
                                         </button>
                                     </form>
                                 </div>
-
                             </div>
-
                         </div>
                     )}
                 </div>
-
             </div>
-
         </div>
     )
 }
