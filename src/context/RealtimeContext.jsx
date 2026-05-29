@@ -32,11 +32,14 @@ export const RealtimeProvider = ({ children }) => {
   const fetchSocialData = async () => {
     const currentUser = userRef.current
     if (!currentUser) return
+    // Debug: log when social fetch runs (temporary)
+    try { console.debug('[Realtime] fetchSocialData for', currentUser.id, new Date().toISOString()) } catch(e) {}
     try {
-      // 1. Fetch friendships
+      // 1. Fetch friendships for current user only (avoid fetching entire table)
       const { data: friendshipsData, error: fError } = await supabase
         .from('player_friendships')
         .select('*')
+        .or(`player_one_id.eq.${currentUser.id},player_two_id.eq.${currentUser.id}`)
       
       if (fError) throw fError
 
@@ -57,10 +60,11 @@ export const RealtimeProvider = ({ children }) => {
         setFriends([])
       }
 
-      // 2. Fetch requests (received and sent)
+      // 2. Fetch requests (received and sent) only for current user
       const { data: reqs, error: rError } = await supabase
         .from('player_friend_requests')
         .select('*')
+        .or(`recipient_id.eq.${currentUser.id},requester_id.eq.${currentUser.id}`)
       
       if (rError) throw rError
 

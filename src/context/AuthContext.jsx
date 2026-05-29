@@ -16,6 +16,7 @@ export const AuthProvider = ({ children }) => {
   const playerSubRef = useRef(null)
   const userRef = useRef(null)
   const isLockedOutRef = useRef(false)
+  const lastHeartbeatRef = useRef(0)
 
   // Keep refs in sync with state (lightweight syncs, no effect re-run risks)
   useEffect(() => { userRef.current = user }, [user])
@@ -217,6 +218,8 @@ export const AuthProvider = ({ children }) => {
     const profile = await fetchPlayerProfile(currentUser.id)
     if (profile) {
       await initializeTabSession(currentUser.id)
+      // record the time we last updated `last_online` during session init
+      lastHeartbeatRef.current = Date.now()
       subscribeToPlayerRow(currentUser.id)
     }
     setLoading(false)
@@ -251,17 +254,20 @@ export const AuthProvider = ({ children }) => {
       // TOKEN_REFRESHED — intentionally ignored; the SDK handles it automatically.
     })
 
-    // Heartbeat: uses ref, never calls getSession() or auth APIs — just a DB write
+    // Heartbeat: throttle DB writes to at most once per minute
     const heartbeat = setInterval(() => {
       const u = userRef.current
+      const now = Date.now()
       if (u && !isLockedOutRef.current) {
+        // Only update if it's been more than 60s since last update
+        if (now - (lastHeartbeatRef.current || 0) < 60000) return
         supabase
           .from('players')
           .update({ last_online: new Date().toISOString() })
           .eq('id', u.id)
-          .then(() => {})
+          .then(() => { lastHeartbeatRef.current = Date.now(); try { console.debug('[Auth] heartbeat update for', u.id, new Date().toISOString()) } catch(e) {} })
       }
-    }, 30000)
+    }, 60000)
 
     return () => {
       subscription.unsubscribe()
