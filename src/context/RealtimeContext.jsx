@@ -293,10 +293,13 @@ export const RealtimeProvider = ({ children }) => {
                         setLobbyMessages([])
                         patchPlayer({ current_lobby_id: null, current_status: 'Online' })
                     } else {
-                        setActiveLobby(payload.new)
+                            setActiveLobby(payload.new)
 
-                        if (payload.new.lobby_state?.Players) {
-                            const inside = Object.keys(payload.new.lobby_state.Players).includes(user?.id)
+                            // Determine if the current user is still in the lobby.
+                            // Note: `Players` intentionally contains only joined guests (not the host).
+                            const playersObj = payload.new.lobby_state?.Players || {}
+                            const isHost = payload.new.host_id === user?.id
+                            const inside = isHost || Object.keys(playersObj).includes(user?.id)
                             if (!inside) {
                                 setActiveLobby(null)
                                 setLobbyMessages([])
@@ -304,7 +307,6 @@ export const RealtimeProvider = ({ children }) => {
                                 alert('You have been kicked from the lobby.')
                             }
                         }
-                    }
                 }
             )
             // Listen for chat messages and transient signals via lobby broadcast channel
@@ -444,13 +446,26 @@ export const RealtimeProvider = ({ children }) => {
                 isHost: false
             }
 
-            // Update lobby row
+            // Update lobby row. If the update is rejected (e.g., RLS prevents non-host updates),
+            // fall back to sending a join request to the host so they can confirm.
             const { error: updErr } = await supabase
                 .from('lobbies')
                 .update({ lobby_state: state })
                 .eq('id', lobby.id)
 
-            if (updErr) throw updErr
+            if (updErr) {
+                console.warn('Could not update lobby row directly, falling back to host-approval flow:', updErr.message)
+                try {
+                    const hostProfile = await fetchPlayerSocialProfile(lobby.host_id)
+                    if (hostProfile?.player_id) {
+                        await sendJoinRequest(hostProfile.player_id, lobby.id)
+                        return { success: false, message: 'Join request sent to host for approval.' }
+                    }
+                } catch (innerErr) {
+                    console.error('Fallback join request failed:', innerErr?.message || innerErr)
+                }
+                throw updErr
+            }
 
             // Update player profile
             await supabase
