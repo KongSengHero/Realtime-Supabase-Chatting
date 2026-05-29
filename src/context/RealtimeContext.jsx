@@ -20,12 +20,18 @@ export const RealtimeProvider = ({ children }) => {
 
   const inboxChannelRef = useRef(null)
   const lobbyChannelRef = useRef(null)
+  const fetchDebounceRef = useRef(null)
+  // Ref-based user snapshot so fetchSocialData can be called from realtime
+  // callbacks without capturing a stale closure
+  const userRef = useRef(user)
+  useEffect(() => { userRef.current = user }, [user])
 
   // ─────────────────────────────────────────────────────────
   // SOCIAL & FRIENDSHIPS FETCH & TRIGGERS
   // ─────────────────────────────────────────────────────────
   const fetchSocialData = async () => {
-    if (!user) return
+    const currentUser = userRef.current
+    if (!currentUser) return
     try {
       // 1. Fetch friendships
       const { data: friendshipsData, error: fError } = await supabase
@@ -35,7 +41,9 @@ export const RealtimeProvider = ({ children }) => {
       if (fError) throw fError
 
       // Fetch user profile rows for all friends
-      const friendIds = friendshipsData.map(f => f.player_one_id === user.id ? f.player_two_id : f.player_one_id)
+      const friendIds = friendshipsData.map(f =>
+        f.player_one_id === currentUser.id ? f.player_two_id : f.player_one_id
+      )
       
       if (friendIds.length > 0) {
         const { data: profiles, error: pError } = await supabase
@@ -56,8 +64,8 @@ export const RealtimeProvider = ({ children }) => {
       
       if (rError) throw rError
 
-      const receivedReqs = reqs.filter(r => r.recipient_id === user.id)
-      const sentReqs = reqs.filter(r => r.requester_id === user.id)
+      const receivedReqs = reqs.filter(r => r.recipient_id === currentUser.id)
+      const sentReqs = reqs.filter(r => r.requester_id === currentUser.id)
 
       // Fetch profile details for received requests
       if (receivedReqs.length > 0) {
@@ -83,6 +91,13 @@ export const RealtimeProvider = ({ children }) => {
     } catch (err) {
       console.error('Error fetching social data:', err.message)
     }
+  }
+
+  // Debounced wrapper — used by realtime callbacks to coalesce rapid-fire
+  // DB change events into a single fetch (avoids double-fetching after writes)
+  const debouncedFetchSocialData = () => {
+    if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current)
+    fetchDebounceRef.current = setTimeout(() => fetchSocialData(), 400)
   }
 
   // Handle Send Friend Request
@@ -118,7 +133,8 @@ export const RealtimeProvider = ({ children }) => {
       
       if (insError) throw insError
       
-      fetchSocialData()
+      // Do NOT manually call fetchSocialData() here — the realtime postgres_changes
+      // subscription will fire and call debouncedFetchSocialData() automatically.
       return { success: true, message: `Friend request sent to ${target.player_name}!` }
     } catch (err) {
       console.error(err)
@@ -146,7 +162,7 @@ export const RealtimeProvider = ({ children }) => {
         .insert({ player_one_id: p1, player_two_id: p2 })
 
       if (error) throw error
-      fetchSocialData()
+      // Realtime subscription handles the refresh
     } catch (err) {
       console.error('Error accepting friend request:', err.message)
     }
@@ -162,7 +178,7 @@ export const RealtimeProvider = ({ children }) => {
         .eq('requester_id', requesterId)
         .eq('recipient_id', user.id)
       
-      fetchSocialData()
+      // Realtime subscription handles the refresh
     } catch (err) {
       console.error('Error rejecting friend request:', err.message)
     }
@@ -181,7 +197,7 @@ export const RealtimeProvider = ({ children }) => {
         .eq('player_one_id', p1)
         .eq('player_two_id', p2)
 
-      fetchSocialData()
+      // Realtime subscription handles the refresh
     } catch (err) {
       console.error('Error removing friend:', err.message)
     }
@@ -640,12 +656,12 @@ export const RealtimeProvider = ({ children }) => {
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'player_friendships' },
-          () => fetchSocialData()
+          () => debouncedFetchSocialData()
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'player_friend_requests' },
-          () => fetchSocialData()
+          () => debouncedFetchSocialData()
         )
         .subscribe()
 
