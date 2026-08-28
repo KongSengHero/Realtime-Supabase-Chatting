@@ -1,0 +1,238 @@
+@import "tailwindcss"; 
+@font-face { 
+    font-family: 'MonoSans'; 
+    src: url('./assets/fonts/MonaSans-VariableFont_wdth_wght.ttf') format('opentype'); 
+    font-weight: normal; 
+    font-style: normal; 
+}
+
+@theme { 
+    --breakpoint-nokia: 320px; 
+    --breakpoint-phone: 400px; 
+    --breakpoint-tablet: 700px; 
+    --breakpoint-laptop: 1000px; 
+    
+    --animate-shimmer-slow: shimmering 3s linear infinite; 
+    --animate-shimmer-fast: shimmering 1s linear infinite; 
+}
+@custom-variant hover_active (&:hover, &:active); 
+@custom-variant group_hover_active (.group:hover &, .group:active &); 
+
+@layer base { 
+    :root { 
+        --safe-top: env(safe-area-inset-top, 0px); 
+        --safe-bottom: env(safe-area-inset-bottom, 0px); 
+        --safe-left: env(safe-area-inset-left, 0px); 
+        --safe-right: env(safe-area-inset-right, 0px); 
+        
+        --font-MONOSANS: 'MonoSans';
+        --transition-duration: 0.2s;
+        --background-img: url('./assets/images/MusicApp_Profile.jpg'); 
+    }
+    
+    * { 
+        margin: 0; padding: 0; 
+        box-sizing: border-box; 
+        font-family: var(--font-MONOSANS); 
+        transition: all var(--transition-duration) ease-in-out; 
+        scrollbar-width: thin; 
+        scrollbar-color: rgba(0,0,0,0.3) transparent; 
+    }
+}
+
+
+
+
+
+/* Main ────────────────────────────────────────────────────────────────────── */
+html, body, #root { 
+    width: 100vw; height: 100svh; 
+    position: relative; 
+    display: flex; flex-direction: column;  justify-content: center; align-items: center; 
+    -webkit-text-size-adjust: 100%; 
+    text-size-adjust: 100%; 
+    overflow: clip; 
+}
+body { 
+    color: white; 
+    background-image: var(--background-img); 
+        background-size: cover; 
+        background-position: center; 
+        background-repeat: no-repeat; 
+    @apply bg-slate-950; 
+}
+button { cursor: pointer; font-family: inherit; }
+input, textarea, select { font-family: inherit; }
+
+@utility page-CONTAINER { 
+    @apply util-ABSOLUTE size-full flex items-center justify-center overflow-hidden 
+            pointer-events-none overscroll-none select-none; 
+}
+
+/* INDEX ────────────────────────────────────────────────────────────────────── */
+@utility index-1-OVERLAY-ACTION { z-index: 500 }
+@utility index-2-WATCH-CONTENT  { z-index: 400 }
+@utility index-2.1-CURR_WATCH   { z-index: 350 }
+@utility index-3-NAVIGATION     { z-index: 300 }
+@utility index-4-SEARCH         { z-index: 200 }
+@utility index-5-MAIN-CONTENT   { z-index: 100 }
+
+
+
+
+
+
+
+
+
+
+/* Utilities ────────────────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────────────── */
+@utility util-ROW { @apply flex flex-row; }
+@utility util-COL { @apply flex flex-col; }
+@utility util-ABSOLUTE { @apply absolute top-0 left-0; }
+
+@utility util-CLIP { @apply text-transparent! bg-clip-text! border-none!; }
+@utility util-ICON-TEXT-1 { @apply flex! items-center! gap-1!; }
+@utility util-ICON-TEXT-2 { @apply flex! items-center! gap-2!; }
+@utility util-ICON-TEXT-3 { @apply flex! items-center! gap-3!; }
+
+/* Others ────────────────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────────────── */
+@utility scrollbar-none { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+@utility tracking-widest2 { letter-spacing: 0.2rem }
+@utility text-xxs { font-size: 0.65rem }
+@utility text-xxs55 { font-size: 0.55rem }
+@utility text-xxs50 { font-size: 0.50rem }
+@utility text-xxs40 { font-size: 0.4rem }
+@utility text-xxs35 { font-size: 0.35rem }
+
+@utility btn-hover { @apply hover:-translate-y-1 active:translate-y-1 hover:brightness-125 active:brightness-75 duration-75!; }
+@utility btn-hover-small { @apply hover:-translate-y-0.5 active:translate-y-0.5 hover:brightness-125 active:brightness-75 duration-75!; }
+
+/* Img ────────────────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────────────── */
+@utility img-scale { & img { @apply group_hover_active:scale-110; } }
+@utility img-Full { 
+    @apply size-full rounded-sm overflow-hidden shrink-0; 
+    & img { @apply size-full object-cover; }
+}
+@utility img-Mid { 
+    @apply size-14 rounded-sm overflow-hidden shrink-0; 
+    & img { @apply size-full object-cover; }
+}
+@utility img-Small { 
+    @apply size-12 rounded-sm overflow-hidden shrink-0; 
+    & img { @apply size-full object-cover; }
+}
+
+
+
+
+
+
+
+
+
+/* Shiny Elements ────────────────────────────────────────────────────────────────────── */
+.SHINY_ELEMENT { 
+    width: 100%; height: 100%; 
+    position: absolute; top: 0; left: 0; 
+    overflow: hidden; 
+    z-index: -1; 
+}
+.SHINY_ELEMENT::after, .SHINY_ELEMENT::before { 
+    content: ""; 
+    width: 0; height: 200%; 
+    position: absolute; 
+    transform-origin: center; 
+    filter: blur(5px); 
+}
+.SHINY_ELEMENT::after { 
+    left: -200%; 
+    box-shadow: 0 0 200px 100px rgba(255, 255, 255, 0.1); 
+    animation: glow 12s ease infinite; 
+}
+.SHINY_ELEMENT::before { 
+    right: -200%; 
+    box-shadow: 0 0 500px 100px rgba(255, 255, 255, 0.4); 
+    animation: glow-2 12s 3s ease infinite; 
+}
+.SHINY_ITEM { 
+    position: relative; 
+    overflow: hidden; 
+}
+.SHINY_ITEM::after { 
+    content: ''; 
+    width: 0; height: 200%; 
+    position: absolute; right: -300%; 
+    transform-origin: center; 
+    filter: blur(5px); 
+    box-shadow: 0 0 100px 50px rgb(255, 255, 255, 0.4); 
+    animation: shine 30s ease infinite; 
+}
+.SHINY_ITEM_2, .SHINY_ITEM_2_SLOW { 
+    position: relative; 
+    overflow: hidden; 
+}
+.SHINY_ITEM_2::after, .SHINY_ITEM_2_SLOW::after { 
+    content: ''; 
+    width: 0; height: 200%; 
+    position: absolute; left: -100%; 
+    transform-origin: center; 
+    filter: blur(5px); 
+    box-shadow: 0 0 100px 100px rgb(255, 255, 255, 0.1); 
+    animation: shine2 1s ease infinite; 
+}
+.SHINY_ITEM_2_SLOW::after { box-shadow: 0 0 200px 100px rgb(255, 255, 255, 0.05); }
+.SHIMMER_TEXT { 
+    color: transparent; 
+    background-clip: text !important; 
+    background: 
+        radial-gradient(circle at center, #ffffff 0%, #a1a1aa 50%, transparent 100%) -200% 50% / 200% 100% no-repeat, 
+        linear-gradient(90deg, #52525b, #a1a1aa, #52525b); 
+    animation: shimmering 3s linear infinite; 
+}
+.SHIMMER_TEXT_2 { 
+    color: transparent; 
+    background-clip: text !important; 
+    background: radial-gradient(circle at center,#ffffff 0%,#a1a1aa 45%,#3f3f46 75%,transparent 100%) -200% 50% / 200% 100% no-repeat, #18181b; 
+    animation: shimmering 3s linear infinite; 
+}
+.SHIMMER_TEXT_2_REVERSE { 
+    color: transparent; 
+    background-clip: text !important; 
+    background: radial-gradient(circle at center,#222121 0%,#6c6c6d 45%,#a9a9af 75%,transparent 100%) -200% 50% / 200% 100% no-repeat, #e5e5ed; 
+    animation: shimmering 3s linear infinite; 
+}
+
+
+
+
+
+
+
+
+
+/* KeyFrames ────────────────────────────────────────────────────────────────────── */
+@keyframes glow { 
+    50%, 100% { left: 200%; transform: rotateZ(20deg); }
+}
+@keyframes glow-2 { 
+    0% { transform: rotateZ(40deg); }
+    50%, 100% { right: 300%; transform: rotateZ(-40deg); }
+}
+@keyframes shine { 
+    0%, 20%, 46%, 68%, 92% { right: -300%; transform: rotateZ(40deg); opacity: 0; }
+    6%, 26%, 52%, 74%, 98% { opacity: 1; }
+    8%, 28%, 54%, 76%, 100% { right: 300%; transform: rotateZ(-40deg); opacity: 0; }
+}
+@keyframes shine2 { 
+    0% { left: -200%; transform: rotateZ(0deg); opacity: 0; }
+    50% { opacity: 1; }
+    100% { left: 300%; transform: rotateZ(20deg); opacity: 0; }
+}
+@keyframes shimmering {
+    0% { background-position: 200% 0%; }
+    100% { background-position: -200% 0%; }
+}
